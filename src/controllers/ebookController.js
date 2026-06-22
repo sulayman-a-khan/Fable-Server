@@ -1,0 +1,427 @@
+const { body, query, param } = require('express-validator');
+const Ebook = require('../models/Ebook');
+const { AppError } = require('../utils/errorHandler');
+
+/**
+ * GET /api/ebooks
+ * Browse all published ebooks with search, filter, sort, and pagination.
+ */
+async function getEbooks(req, res, next) {
+  try {
+    const {
+      search,
+      genre,
+      minPrice,
+      maxPrice,
+      sort = 'newest',
+      page = 1,
+      limit = 12,
+    } = req.query;
+
+    const filter = {};
+    if (!req.user || req.user.role !== 'admin') {
+      filter.status = 'published';
+    }
+
+    // Search by title or writer name
+    if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ title: searchRegex }];
+    }
+
+    // Filter by genre
+    if (genre) {
+      filter.genre = genre;
+    }
+
+    // Filter by price range
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = parseFloat(minPrice);
+      if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
+    }
+
+    // Sorting
+    let sortOption = {};
+    switch (sort) {
+      case 'price-low':
+        sortOption = { price: 1 };
+        break;
+      case 'price-high':
+        sortOption = { price: -1 };
+        break;
+      case 'oldest':
+        sortOption = { createdAt: 1 };
+        break;
+      case 'newest':
+      default:
+        sortOption = { createdAt: -1 };
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
+    const skip = (pageNum - 1) * limitNum;
+
+    // If searching by writer name, we need a different approach
+    let pipeline;
+    if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      pipeline = [
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'writer',
+            foreignField: '_id',
+            as: 'writerInfo',
+          },
+        },
+        { $unwind: '$writerInfo' },
+        {
+          $match: {
+            ...(!req.user || req.user.role !== 'admin' ? { status: 'published' } : {}),
+            ...(genre ? { genre } : {}),
+            ...(minPrice || maxPrice
+              ? {
+                  price: {
+                    ...(minPrice ? { $gte: parseFloat(minPrice) } : {}),
+                    ...(maxPrice ? { $lte: parseFloat(maxPrice) } : {}),
+                  },
+                }
+              : {}),
+            $or: [
+              { title: searchRegex },
+              { 'writerInfo.name': searchRegex },
+            ],
+          },
+        },
+        {
+          $facet: {
+            data: [
+              { $sort: sortOption },
+              { $skip: skip },
+              { $limit: limitNum },
+              {
+                $project: {
+                  title: 1,
+                  description: { $substrCP: ['$description', 0, 200] },
+                  price: 1,
+                  genre: 1,
+                  coverImage: 1,
+                  status: 1,
+                  totalSold: 1,
+                  createdAt: 1,
+                  updatedAt: 1,
+                  writer: {
+                    _id: '$writerInfo._id',
+                    name: '$writerInfo.name',
+                    avatar: '$writerInfo.avatar',
+                  },
+                },
+              },
+            ],
+            total: [{ $count: 'count' }],
+          },
+        },
+      ];
+
+      const results = await Ebook.aggregate(pipeline);
+      const ebooks = results[0].data;
+      const total = results[0].total[0]?.count || 0;
+
+      return res.json({
+        success: true,
+        ebooks,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    }
+
+    const [ebooks, total] = await Promise.all([
+      Ebook.find(filter)
+        .populate('writer', 'name avatar')
+        .sort(sortOption)
+        .skip(skip)
+        .limit(limitNum)
+        .select('-description'),
+      Ebook.countDocuments(filter),
+    ]);
+
+    res.json({
+      success: true,
+      ebooks,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/ebooks/featured
+ * Get latest 6 ebooks for homepage.
+ */
+async function getFeaturedEbooks(req, res, next) {
+  try {
+    const ebooks = await Ebook.find({ status: 'published' })
+      .populate('writer', 'name avatar')
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .select('-description');
+
+    res.json({ success: true, ebooks });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/ebooks/:id
+ * Get single ebook details.
+ */
+async function getEbook(req, res, next) {
+  try {
+    const ebook = await Ebook.findById(req.params.id).populate(
+      'writer',
+      'name avatar email'
+    );
+
+    if (!ebook) {
+      throw new AppError('Ebook not found', 404);
+    }
+
+    // If ebook is unpublished, only writer or admin can view
+    if (ebook.status === 'unpublished') {
+      if (
+        !req.user ||
+        (req.user.role !== 'admin' &&
+          req.user._id.toString() !== ebook.writer._id.toString())
+      ) {
+        throw new AppError('Ebook not found', 404);
+      }
+    }
+
+    res.json({ success: true, ebook });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/ebooks/writer/:writerId
+ * Get ebooks by specific writer.
+ */
+async function getEbooksByWriter(req, res, next) {
+  try {
+    const filter = { writer: req.params.writerId };
+
+    // Only show published ebooks unless it's the writer or admin
+    if (
+      !req.user ||
+      (req.user.role !== 'admin' &&
+        req.user._id.toString() !== req.params.writerId)
+    ) {
+      filter.status = 'published';
+    }
+
+    const ebooks = await Ebook.find(filter)
+      .populate('writer', 'name avatar')
+      .sort({ createdAt: -1 })
+      .select('-description');
+
+    res.json({ success: true, ebooks });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/ebooks
+ * Create a new ebook (writer only).
+ */
+const createEbookValidation = [
+  body('title')
+    .trim()
+    .notEmpty()
+    .withMessage('Title is required')
+    .isLength({ max: 200 })
+    .withMessage('Title cannot exceed 200 characters'),
+  body('description')
+    .trim()
+    .notEmpty()
+    .withMessage('Description is required')
+    .isLength({ max: 50000 })
+    .withMessage('Description cannot exceed 50000 characters'),
+  body('price')
+    .isFloat({ min: 0 })
+    .withMessage('Price must be a positive number'),
+  body('genre')
+    .isIn([
+      'Fiction', 'Mystery', 'Romance', 'Sci-Fi', 'Fantasy', 'Horror',
+      'Thriller', 'Non-Fiction', 'Biography', 'Self-Help', 'History', 'Poetry',
+    ])
+    .withMessage('Invalid genre'),
+  body('coverImage')
+    .trim()
+    .notEmpty()
+    .withMessage('Cover image is required')
+    .isURL()
+    .withMessage('Cover image must be a valid URL'),
+];
+
+async function createEbook(req, res, next) {
+  try {
+    const { title, description, price, genre, coverImage } = req.body;
+
+    const ebook = await Ebook.create({
+      title,
+      description,
+      price,
+      genre,
+      coverImage,
+      writer: req.user._id,
+    });
+
+    await ebook.populate('writer', 'name avatar');
+
+    res.status(201).json({
+      success: true,
+      message: 'Ebook created successfully',
+      ebook,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * PUT /api/ebooks/:id
+ * Update an ebook (writer/owner only).
+ */
+async function updateEbook(req, res, next) {
+  try {
+    const ebook = await Ebook.findById(req.params.id);
+
+    if (!ebook) {
+      throw new AppError('Ebook not found', 404);
+    }
+
+    // Only owner or admin can update
+    if (
+      req.user.role !== 'admin' &&
+      req.user._id.toString() !== ebook.writer.toString()
+    ) {
+      throw new AppError('You can only edit your own ebooks', 403);
+    }
+
+    const { title, description, price, genre, coverImage } = req.body;
+
+    if (title) ebook.title = title;
+    if (description) ebook.description = description;
+    if (price !== undefined) ebook.price = price;
+    if (genre) ebook.genre = genre;
+    if (coverImage) ebook.coverImage = coverImage;
+
+    await ebook.save();
+    await ebook.populate('writer', 'name avatar');
+
+    res.json({
+      success: true,
+      message: 'Ebook updated successfully',
+      ebook,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * PATCH /api/ebooks/:id/status
+ * Publish or unpublish an ebook (writer/owner or admin).
+ */
+const statusValidation = [
+  body('status')
+    .isIn(['published', 'unpublished'])
+    .withMessage('Status must be published or unpublished'),
+];
+
+async function updateEbookStatus(req, res, next) {
+  try {
+    const ebook = await Ebook.findById(req.params.id);
+
+    if (!ebook) {
+      throw new AppError('Ebook not found', 404);
+    }
+
+    // Only owner or admin can change status
+    if (
+      req.user.role !== 'admin' &&
+      req.user._id.toString() !== ebook.writer.toString()
+    ) {
+      throw new AppError('You can only manage your own ebooks', 403);
+    }
+
+    ebook.status = req.body.status;
+    await ebook.save();
+
+    res.json({
+      success: true,
+      message: `Ebook ${req.body.status} successfully`,
+      ebook,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * DELETE /api/ebooks/:id
+ * Delete an ebook (writer/owner or admin).
+ */
+async function deleteEbook(req, res, next) {
+  try {
+    const ebook = await Ebook.findById(req.params.id);
+
+    if (!ebook) {
+      throw new AppError('Ebook not found', 404);
+    }
+
+    // Only owner or admin can delete
+    if (
+      req.user.role !== 'admin' &&
+      req.user._id.toString() !== ebook.writer.toString()
+    ) {
+      throw new AppError('You can only delete your own ebooks', 403);
+    }
+
+    await ebook.deleteOne();
+
+    res.json({
+      success: true,
+      message: 'Ebook deleted successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = {
+  getEbooks,
+  getFeaturedEbooks,
+  getEbook,
+  getEbooksByWriter,
+  createEbook,
+  createEbookValidation,
+  updateEbook,
+  updateEbookStatus,
+  statusValidation,
+  deleteEbook,
+};
