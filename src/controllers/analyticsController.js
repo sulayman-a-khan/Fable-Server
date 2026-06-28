@@ -128,8 +128,108 @@ async function getGenreDistribution(req, res, next) {
   }
 }
 
+/**
+ * GET /api/analytics/genre-revenue
+ * Get total revenue grouped by genre (joins transactions → ebooks).
+ */
+async function getGenreRevenue(req, res, next) {
+  try {
+    const data = await Transaction.aggregate([
+      { $match: { status: 'completed' } },
+      {
+        $lookup: {
+          from: 'ebooks',
+          localField: 'ebook',
+          foreignField: '_id',
+          as: 'ebookData',
+        },
+      },
+      { $unwind: '$ebookData' },
+      {
+        $group: {
+          _id: '$ebookData.genre',
+          revenue: { $sum: '$amount' },
+          sales: { $sum: 1 },
+        },
+      },
+      { $sort: { revenue: -1 } },
+      {
+        $project: {
+          _id: 0,
+          genre: '$_id',
+          revenue: { $round: ['$revenue', 2] },
+          sales: 1,
+        },
+      },
+    ]);
+
+    res.json({ success: true, genreRevenue: data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/analytics/top-ebooks
+ * Get the top 5 best-selling ebooks on the platform.
+ */
+async function getTopEbooks(req, res, next) {
+  try {
+    const topEbooks = await Ebook.find({ status: 'published' })
+      .populate('writer', 'name')
+      .sort({ totalSold: -1 })
+      .limit(5)
+      .select('title genre price totalSold coverImage writer');
+
+    res.json({ success: true, topEbooks });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getOverview,
   getMonthlySales,
   getGenreDistribution,
+  getGenreRevenue,
+  getTopEbooks,
+  getWriterStats,
 };
+
+/**
+ * GET /api/analytics/writer-stats
+ * Returns quick stats for the authenticated writer:
+ * totalBooks, totalSold, totalRevenue, recentSales (last 5).
+ */
+async function getWriterStats(req, res, next) {
+  try {
+    const writerId = req.user._id;
+
+    const [ebookCount, salesAgg, recentSales] = await Promise.all([
+      require('../models/Ebook').countDocuments({ writer: writerId }),
+      Transaction.aggregate([
+        { $match: { writer: writerId, status: 'completed' } },
+        { $group: { _id: null, totalRevenue: { $sum: '$amount' }, totalSold: { $sum: 1 } } },
+      ]),
+      Transaction.find({ writer: writerId, status: 'completed' })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .populate('ebook', 'title coverImage')
+        .populate('buyer', 'name'),
+    ]);
+
+    const agg = salesAgg[0] || { totalRevenue: 0, totalSold: 0 };
+
+    res.json({
+      success: true,
+      stats: {
+        totalBooks: ebookCount,
+        totalSold: agg.totalSold,
+        totalRevenue: parseFloat(agg.totalRevenue.toFixed(2)),
+        recentSales,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
