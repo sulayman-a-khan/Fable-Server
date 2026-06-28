@@ -106,18 +106,21 @@ function generateToken(userId) {
  */
 function setTokenCookie(res, token) {
   const isProduction = process.env.NODE_ENV === 'production';
-  const cookieName = isProduction ? '__Host-fable_token' : 'fable_token';
+  const req = res.req;
+  const isSecureConnection = req ? (req.secure || req.headers['x-forwarded-proto'] === 'https') : false;
+  const useSecure = isProduction && isSecureConnection;
+  const cookieName = useSecure ? '__Host-fable_token' : 'fable_token';
 
   const cookieOptions = {
     httpOnly: true,
-    secure: isProduction,
+    secure: useSecure,
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
   };
 
   // __Host- prefix requires no domain attribute
-  if (!isProduction) {
+  if (!useSecure) {
     cookieOptions.domain = undefined;
   }
 
@@ -129,11 +132,14 @@ function setTokenCookie(res, token) {
  */
 function clearTokenCookie(res) {
   const isProduction = process.env.NODE_ENV === 'production';
-  const cookieName = isProduction ? '__Host-fable_token' : 'fable_token';
+  const req = res.req;
+  const isSecureConnection = req ? (req.secure || req.headers['x-forwarded-proto'] === 'https') : false;
+  const useSecure = isProduction && isSecureConnection;
+  const cookieName = useSecure ? '__Host-fable_token' : 'fable_token';
 
   res.clearCookie(cookieName, {
     httpOnly: true,
-    secure: isProduction,
+    secure: useSecure,
     sameSite: 'lax',
     path: '/',
   });
