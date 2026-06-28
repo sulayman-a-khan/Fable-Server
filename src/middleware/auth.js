@@ -14,7 +14,12 @@ const REFRESH_HINT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
  */
 async function authenticate(req, res, next) {
   try {
-    const token = req.cookies?.['__Host-fable_token'] || req.cookies?.['fable_token'];
+    let token = req.cookies?.['__Host-fable_token'] || req.cookies?.['fable_token'];
+
+    // Fallback: check Authorization header
+    if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
 
     if (!token) {
       return res.status(401).json({
@@ -73,7 +78,13 @@ async function authenticate(req, res, next) {
  */
 async function optionalAuth(req, res, next) {
   try {
-    const token = req.cookies?.['__Host-fable_token'] || req.cookies?.['fable_token'];
+    let token = req.cookies?.['__Host-fable_token'] || req.cookies?.['fable_token'];
+    
+    // Fallback: check Authorization header
+    if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+
     if (token) {
       const decoded = jwt.verify(token, JWT_SECRET, {
         algorithms: [ALGORITHM],

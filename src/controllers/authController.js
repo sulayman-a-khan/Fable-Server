@@ -56,6 +56,7 @@ async function register(req, res, next) {
       success: true,
       message: 'Registration successful',
       user: user.toJSON(),
+      token,
     });
   } catch (error) {
     next(error);
@@ -106,6 +107,7 @@ async function login(req, res, next) {
       success: true,
       message: 'Login successful',
       user: user.toJSON(),
+      token,
     });
   } catch (error) {
     next(error);
@@ -171,6 +173,7 @@ async function googleLogin(req, res, next) {
       success: true,
       message: 'Login successful',
       user: user.toJSON(),
+      token: jwtToken,
     });
   } catch (error) {
     next(new AppError(error.message || 'Google token verification failed', 401));
