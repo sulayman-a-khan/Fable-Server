@@ -4,10 +4,13 @@ const { getSecret } = require('../utils/getSecret');
 
 const JWT_SECRET = getSecret('JWT_SECRET', 'jwt_secret.txt');
 const ALGORITHM = 'HS256';
+// Token expiry window — if token has less than 1 day left, add a header hint
+const REFRESH_HINT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Authentication middleware.
  * Extracts JWT from HttpOnly cookie, verifies it, and attaches user to request.
+ * Also adds X-Token-Expiring header if token expires within 24 hours.
  */
 async function authenticate(req, res, next) {
   try {
@@ -33,7 +36,13 @@ async function authenticate(req, res, next) {
       });
     }
 
-    const user = await User.findById(decoded.userId);
+    // Hint client to refresh if expiring soon
+    const expiresInMs = decoded.exp * 1000 - Date.now();
+    if (expiresInMs < REFRESH_HINT_THRESHOLD_MS) {
+      res.setHeader('X-Token-Expiring', 'true');
+    }
+
+    const user = await User.findById(decoded.userId).select('-password');
 
     if (!user) {
       return res.status(401).json({
