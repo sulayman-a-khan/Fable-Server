@@ -22,6 +22,9 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy for secure cookies behind reverse proxy (Render)
+app.set('trust proxy', 1);
+
 // --- Security Middleware ---
 
 // Helmet for security headers

@@ -108,21 +108,18 @@ function setTokenCookie(res, token) {
   const isProduction = process.env.NODE_ENV === 'production';
   const req = res.req;
   const isSecureConnection = req ? (req.secure || req.headers['x-forwarded-proto'] === 'https') : false;
-  const useSecure = isProduction && isSecureConnection;
+  // Enable secure cookies if explicitly production OR if serving secure HTTPS request
+  const useSecure = isProduction || isSecureConnection;
   const cookieName = useSecure ? '__Host-fable_token' : 'fable_token';
 
   const cookieOptions = {
     httpOnly: true,
     secure: useSecure,
-    sameSite: 'lax',
+    // Cross-origin cookies (Vercel to Render) require SameSite=None & Secure=true
+    sameSite: useSecure ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
   };
-
-  // __Host- prefix requires no domain attribute
-  if (!useSecure) {
-    cookieOptions.domain = undefined;
-  }
 
   res.cookie(cookieName, token, cookieOptions);
 }
@@ -134,13 +131,13 @@ function clearTokenCookie(res) {
   const isProduction = process.env.NODE_ENV === 'production';
   const req = res.req;
   const isSecureConnection = req ? (req.secure || req.headers['x-forwarded-proto'] === 'https') : false;
-  const useSecure = isProduction && isSecureConnection;
+  const useSecure = isProduction || isSecureConnection;
   const cookieName = useSecure ? '__Host-fable_token' : 'fable_token';
 
   res.clearCookie(cookieName, {
     httpOnly: true,
     secure: useSecure,
-    sameSite: 'lax',
+    sameSite: useSecure ? 'none' : 'lax',
     path: '/',
   });
 }
