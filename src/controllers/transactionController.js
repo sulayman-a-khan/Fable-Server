@@ -281,6 +281,38 @@ async function checkPurchase(req, res, next) {
   }
 }
 
+/**
+ * GET /api/transactions/summary
+ * Returns a quick stats summary for the authenticated user's purchases.
+ */
+async function getPurchaseSummary(req, res, next) {
+  try {
+    const [totalResult, recentPurchases] = await Promise.all([
+      Transaction.aggregate([
+        { $match: { buyer: req.user._id, status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+      ]),
+      Transaction.find({ buyer: req.user._id, status: 'completed' })
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .populate('ebook', 'title coverImage genre'),
+    ]);
+
+    const summary = totalResult[0] || { total: 0, count: 0 };
+
+    res.json({
+      success: true,
+      summary: {
+        totalSpent: parseFloat(summary.total.toFixed(2)),
+        totalPurchases: summary.count,
+        recentPurchases,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createCheckoutSession,
   handleWebhook,
@@ -289,4 +321,5 @@ module.exports = {
   getWriterSales,
   getAllTransactions,
   checkPurchase,
+  getPurchaseSummary,
 };

@@ -37,16 +37,32 @@ const transactionSchema = new mongoose.Schema(
       enum: ['completed', 'pending', 'failed'],
       default: 'pending',
     },
+    // Currency code for future multi-currency support
+    currency: {
+      type: String,
+      default: 'usd',
+      lowercase: true,
+    },
+    // Refund tracking
+    refunded: {
+      type: Boolean,
+      default: false,
+    },
+    refundedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-transactionSchema.index({ buyer: 1 });
+// Compound index to prevent duplicate purchases
+transactionSchema.index({ buyer: 1, ebook: 1 });
 transactionSchema.index({ writer: 1 });
-transactionSchema.index({ ebook: 1 });
 transactionSchema.index({ status: 1 });
 transactionSchema.index({ createdAt: -1 });
+transactionSchema.index({ stripeSessionId: 1 }, { unique: true });
 
 module.exports = mongoose.model('Transaction', transactionSchema);
