@@ -12,6 +12,7 @@ const {
   getMe,
   setRole,
   roleValidation,
+  changePassword,
 } = require('../controllers/authController');
 
 router.post('/register', registerValidation, validate, register);
@@ -20,5 +21,6 @@ router.post('/google', googleLogin);
 router.post('/logout', logout);
 router.get('/me', authenticate, getMe);
 router.patch('/role', authenticate, roleValidation, validate, setRole);
+router.post('/change-password', authenticate, changePassword);
 
 module.exports = router;

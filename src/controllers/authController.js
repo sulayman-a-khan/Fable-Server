@@ -232,6 +232,40 @@ async function setRole(req, res, next) {
   }
 }
 
+/**
+ * POST /api/auth/change-password
+ * Allows authenticated users (non-Google) to change their password.
+ */
+async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      throw new AppError('Both currentPassword and newPassword are required', 400);
+    }
+    if (newPassword.length < 8) {
+      throw new AppError('New password must be at least 8 characters', 400);
+    }
+
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user) throw new AppError('User not found', 404);
+
+    if (user.googleId && !user.password) {
+      throw new AppError('Google-authenticated accounts cannot change password here', 400);
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) throw new AppError('Current password is incorrect', 401);
+
+    user.password = newPassword;
+    await user.save();
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   register,
   registerValidation,
@@ -242,4 +276,5 @@ module.exports = {
   getMe,
   setRole,
   roleValidation,
+  changePassword,
 };
