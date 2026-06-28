@@ -119,9 +119,17 @@ app.use('/api/bookmarks', bookmarkRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/upload', uploadRoutes);
 
-// Health check
+// Health check with DB status
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'Fable API is running', timestamp: new Date().toISOString() });
+  const dbState = mongoose.connection.readyState;
+  const dbStatus = ['disconnected', 'connected', 'connecting', 'disconnecting'][dbState] || 'unknown';
+  res.json({
+    success: true,
+    message: 'Fable API is running',
+    timestamp: new Date().toISOString(),
+    db: dbStatus,
+    uptime: Math.floor(process.uptime()) + 's',
+  });
 });
 
 // --- Error Handling ---
