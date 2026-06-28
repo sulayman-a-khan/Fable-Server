@@ -8,6 +8,7 @@ function errorHandler(err, req, res, _next) {
   console.error(`[ERROR] ${req.method} ${req.path}:`, {
     message: err.message,
     status: err.statusCode || 500,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
     timestamp: new Date().toISOString(),
   });
 
@@ -16,17 +17,18 @@ function errorHandler(err, req, res, _next) {
     const messages = Object.values(err.errors).map((e) => e.message);
     return res.status(400).json({
       success: false,
-      message: 'Validation failed',
+      message: messages[0] || 'Validation failed',
       errors: messages,
     });
   }
 
   // Mongoose duplicate key error
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue)[0];
+    const field = Object.keys(err.keyValue || {})[0] || 'field';
+    const friendlyField = field === 'email' ? 'email address' : field;
     return res.status(409).json({
       success: false,
-      message: `A record with this ${field} already exists`,
+      message: `This ${friendlyField} is already in use`,
     });
   }
 
@@ -42,14 +44,37 @@ function errorHandler(err, req, res, _next) {
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
       success: false,
-      message: 'Invalid authentication token',
+      message: 'Invalid authentication token. Please log in again.',
     });
   }
 
   if (err.name === 'TokenExpiredError') {
     return res.status(401).json({
       success: false,
-      message: 'Authentication token has expired',
+      message: 'Your session has expired. Please log in again.',
+    });
+  }
+
+  // Multer / file upload errors
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      success: false,
+      message: 'Uploaded file is too large. Maximum size is 5MB.',
+    });
+  }
+
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({
+      success: false,
+      message: 'Unexpected file field in upload',
+    });
+  }
+
+  // Stripe errors (avoid leaking internal Stripe details)
+  if (err.type && err.type.startsWith('Stripe')) {
+    return res.status(402).json({
+      success: false,
+      message: 'Payment processing failed. Please check your payment details.',
     });
   }
 
@@ -70,10 +95,11 @@ function errorHandler(err, req, res, _next) {
  * Custom error class with status code
  */
 class AppError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode = 500) {
     super(message);
     this.statusCode = statusCode;
     this.name = 'AppError';
+    Error.captureStackTrace(this, this.constructor);
   }
 }
 
