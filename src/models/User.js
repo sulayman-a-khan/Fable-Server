@@ -67,4 +67,9 @@ userSchema.methods.toJSON = function () {
   return obj;
 };
 
+// Virtual: check if user is a premium role (writer or admin)
+userSchema.virtual('isPremium').get(function () {
+  return this.role === 'writer' || this.role === 'admin';
+});
+
 module.exports = mongoose.model('User', userSchema);

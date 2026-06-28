@@ -136,9 +136,44 @@ async function getTopWriters(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/users/profile
+ * Update current user's own profile (name, avatar).
+ */
+async function updateProfile(req, res, next) {
+  try {
+    const { name, avatar } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (name && name.trim()) {
+      user.name = name.trim().slice(0, 100);
+    }
+    if (typeof avatar === 'string') {
+      user.avatar = avatar;
+    }
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: user.toJSON(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getUsers,
   changeUserRole,
   deleteUser,
   getTopWriters,
+  updateProfile,
 };
+
+

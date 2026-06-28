@@ -7,10 +7,14 @@ const {
   changeUserRole,
   deleteUser,
   getTopWriters,
+  updateProfile,
 } = require('../controllers/userController');
 
 // Public
 router.get('/top-writers', getTopWriters);
+
+// Authenticated user
+router.patch('/profile', authenticate, updateProfile);
 
 // Admin only
 router.get('/', authenticate, authorize('admin'), getUsers);
