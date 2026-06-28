@@ -4,17 +4,15 @@ const { getSecret } = require('../utils/getSecret');
 
 const JWT_SECRET = getSecret('JWT_SECRET', 'jwt_secret.txt');
 const ALGORITHM = 'HS256';
-// Token expiry window — if token has less than 1 day left, add a header hint
 const REFRESH_HINT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Authentication middleware.
  * Extracts JWT from HttpOnly cookie, verifies it, and attaches user to request.
- * Also adds X-Token-Expiring header if token expires within 24 hours.
  */
 async function authenticate(req, res, next) {
   try {
-    let token = req.cookies?.['__Host-fable_token'] || req.cookies?.['fable_token'];
+    let token = req.cookies?.['fable_token'];
 
     // Fallback: check Authorization header
     if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
@@ -28,12 +26,10 @@ async function authenticate(req, res, next) {
       });
     }
 
-    // Verify with hardcoded algorithm; rejects 'none' algorithm
     const decoded = jwt.verify(token, JWT_SECRET, {
       algorithms: [ALGORITHM],
     });
 
-    // Validate exp claim
     if (!decoded.exp) {
       return res.status(401).json({
         success: false,
@@ -41,7 +37,6 @@ async function authenticate(req, res, next) {
       });
     }
 
-    // Hint client to refresh if expiring soon
     const expiresInMs = decoded.exp * 1000 - Date.now();
     if (expiresInMs < REFRESH_HINT_THRESHOLD_MS) {
       res.setHeader('X-Token-Expiring', 'true');
@@ -74,13 +69,11 @@ async function authenticate(req, res, next) {
 
 /**
  * Optional authentication - doesn't fail if no token present.
- * Used for public pages that show different content for logged-in users.
  */
 async function optionalAuth(req, res, next) {
   try {
-    let token = req.cookies?.['__Host-fable_token'] || req.cookies?.['fable_token'];
-    
-    // Fallback: check Authorization header
+    let token = req.cookies?.['fable_token'];
+
     if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       token = req.headers.authorization.split(' ')[1];
     }
@@ -114,25 +107,17 @@ function generateToken(userId) {
 
 /**
  * Set JWT token as HttpOnly cookie.
+ * Uses plain fable_token name — __Host- prefix is blocked cross-origin (Vercel → Render).
  */
 function setTokenCookie(res, token) {
   const isProduction = process.env.NODE_ENV === 'production';
-  const req = res.req;
-  const isSecureConnection = req ? (req.secure || req.headers['x-forwarded-proto'] === 'https') : false;
-  // Enable secure cookies if explicitly production OR if serving secure HTTPS request
-  const useSecure = isProduction || isSecureConnection;
-  const cookieName = useSecure ? '__Host-fable_token' : 'fable_token';
-
-  const cookieOptions = {
+  res.cookie('fable_token', token, {
     httpOnly: true,
-    secure: useSecure,
-    // Cross-origin cookies (Vercel to Render) require SameSite=None & Secure=true
-    sameSite: useSecure ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
-  };
-
-  res.cookie(cookieName, token, cookieOptions);
+  });
 }
 
 /**
@@ -140,15 +125,10 @@ function setTokenCookie(res, token) {
  */
 function clearTokenCookie(res) {
   const isProduction = process.env.NODE_ENV === 'production';
-  const req = res.req;
-  const isSecureConnection = req ? (req.secure || req.headers['x-forwarded-proto'] === 'https') : false;
-  const useSecure = isProduction || isSecureConnection;
-  const cookieName = useSecure ? '__Host-fable_token' : 'fable_token';
-
-  res.clearCookie(cookieName, {
+  res.clearCookie('fable_token', {
     httpOnly: true,
-    secure: useSecure,
-    sameSite: useSecure ? 'none' : 'lax',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
     path: '/',
   });
 }
