@@ -81,8 +81,22 @@ async function checkBookmark(req, res, next) {
   }
 }
 
+/**
+ * GET /api/bookmarks/count/:ebookId
+ * Get the total number of users who bookmarked a given ebook (public).
+ */
+async function getBookmarkCount(req, res, next) {
+  try {
+    const count = await Bookmark.countDocuments({ ebook: req.params.ebookId });
+    res.json({ success: true, count });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   toggleBookmark,
   getBookmarks,
   checkBookmark,
+  getBookmarkCount,
 };
