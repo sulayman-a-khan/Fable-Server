@@ -7,6 +7,7 @@ const {
   getEbooks,
   getFeaturedEbooks,
   getEbook,
+  getRelatedEbooks,
   getEbooksByWriter,
   createEbook,
   createEbookValidation,
@@ -20,6 +21,7 @@ const {
 router.get('/', optionalAuth, getEbooks);
 router.get('/featured', getFeaturedEbooks);
 router.get('/writer/:writerId', optionalAuth, getEbooksByWriter);
+router.get('/:id/related', getRelatedEbooks);
 router.get('/:id', optionalAuth, getEbook);
 
 // Protected routes (writer)

@@ -413,10 +413,36 @@ async function deleteEbook(req, res, next) {
   }
 }
 
+/**
+ * GET /api/ebooks/:id/related
+ * Get up to 4 ebooks in the same genre, excluding the current one.
+ */
+async function getRelatedEbooks(req, res, next) {
+  try {
+    const ebook = await Ebook.findById(req.params.id).select('genre');
+    if (!ebook) throw new AppError('Ebook not found', 404);
+
+    const related = await Ebook.find({
+      _id: { $ne: ebook._id },
+      genre: ebook.genre,
+      status: 'published',
+    })
+      .populate('writer', 'name avatar')
+      .sort({ totalSold: -1, createdAt: -1 })
+      .limit(4)
+      .select('-description');
+
+    res.json({ success: true, ebooks: related });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getEbooks,
   getFeaturedEbooks,
   getEbook,
+  getRelatedEbooks,
   getEbooksByWriter,
   createEbook,
   createEbookValidation,
