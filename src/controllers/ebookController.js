@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { body, query, param } = require('express-validator');
 const Ebook = require('../models/Ebook');
 const Transaction = require('../models/Transaction');
@@ -19,6 +20,18 @@ async function getEbooks(req, res, next) {
       page = 1,
       limit = 12,
     } = req.query;
+
+    // Fetch user purchased book ids if logged in
+    let purchasedEbookIds = [];
+    let purchasedEbookObjectIds = [];
+    if (req.user) {
+      const transactions = await Transaction.find({
+        buyer: req.user._id,
+        status: 'completed',
+      }).select('ebook');
+      purchasedEbookIds = transactions.map((t) => t.ebook.toString());
+      purchasedEbookObjectIds = transactions.map((t) => t.ebook);
+    }
 
     const filter = {};
     if (!req.user || req.user.role !== 'admin') {
@@ -43,11 +56,21 @@ async function getEbooks(req, res, next) {
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
     }
 
-    // Filter by availability
+    // Filter by availability (role-based)
     if (availability === 'in-stock') {
-      filter.totalSold = 0;
+      if (req.user && req.user.role === 'admin') {
+        filter.totalSold = 0;
+      } else if (req.user) {
+        filter._id = { $nin: purchasedEbookObjectIds };
+      }
     } else if (availability === 'sold') {
-      filter.totalSold = { $gt: 0 };
+      if (req.user && req.user.role === 'admin') {
+        filter.totalSold = { $gt: 0 };
+      } else if (req.user) {
+        filter._id = { $in: purchasedEbookObjectIds };
+      } else {
+        filter._id = { $in: [] };
+      }
     }
 
     // Sorting
@@ -70,16 +93,6 @@ async function getEbooks(req, res, next) {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
     const skip = (pageNum - 1) * limitNum;
-
-    // Fetch user purchased book ids if logged in
-    let purchasedEbookIds = [];
-    if (req.user) {
-      const transactions = await Transaction.find({
-        buyer: req.user._id,
-        status: 'completed',
-      }).select('ebook');
-      purchasedEbookIds = transactions.map((t) => t.ebook.toString());
-    }
 
     // If searching by writer name, we need a different approach
     let pipeline;
@@ -107,8 +120,20 @@ async function getEbooks(req, res, next) {
                   },
                 }
               : {}),
-            ...(availability === 'in-stock' ? { totalSold: 0 } : {}),
-            ...(availability === 'sold' ? { totalSold: { $gt: 0 } } : {}),
+            ...(availability === 'in-stock'
+              ? (req.user && req.user.role === 'admin'
+                ? { totalSold: 0 }
+                : req.user
+                  ? { _id: { $nin: purchasedEbookObjectIds } }
+                  : {})
+              : {}),
+            ...(availability === 'sold'
+              ? (req.user && req.user.role === 'admin'
+                ? { totalSold: { $gt: 0 } }
+                : req.user
+                  ? { _id: { $in: purchasedEbookObjectIds } }
+                  : { _id: { $in: [] } })
+              : {}),
             $or: [
               { title: searchRegex },
               { 'writerInfo.name': searchRegex },
