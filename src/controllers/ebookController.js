@@ -167,16 +167,18 @@ async function getEbooks(req, res, next) {
 
 /**
  * GET /api/ebooks/featured
- * Get latest 6 ebooks for homepage.
+ * Get latest 8 ebooks for homepage.
  */
 async function getFeaturedEbooks(req, res, next) {
   try {
     const ebooks = await Ebook.find({ status: 'published' })
       .populate('writer', 'name avatar')
       .sort({ createdAt: -1 })
-      .limit(6)
+      .limit(8)
       .select('-description');
 
+    // Cache for 60s to speed up first-load on the homepage
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     res.json({ success: true, ebooks });
   } catch (error) {
     next(error);
