@@ -1,5 +1,6 @@
 const { body, query, param } = require('express-validator');
 const Ebook = require('../models/Ebook');
+const Transaction = require('../models/Transaction');
 const { AppError } = require('../utils/errorHandler');
 
 /**
@@ -13,6 +14,7 @@ async function getEbooks(req, res, next) {
       genre,
       minPrice,
       maxPrice,
+      availability,
       sort = 'newest',
       page = 1,
       limit = 12,
@@ -41,6 +43,13 @@ async function getEbooks(req, res, next) {
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
     }
 
+    // Filter by availability
+    if (availability === 'in-stock') {
+      filter.totalSold = 0;
+    } else if (availability === 'sold') {
+      filter.totalSold = { $gt: 0 };
+    }
+
     // Sorting
     let sortOption = {};
     switch (sort) {
@@ -61,6 +70,16 @@ async function getEbooks(req, res, next) {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 12));
     const skip = (pageNum - 1) * limitNum;
+
+    // Fetch user purchased book ids if logged in
+    let purchasedEbookIds = [];
+    if (req.user) {
+      const transactions = await Transaction.find({
+        buyer: req.user._id,
+        status: 'completed',
+      }).select('ebook');
+      purchasedEbookIds = transactions.map((t) => t.ebook.toString());
+    }
 
     // If searching by writer name, we need a different approach
     let pipeline;
@@ -88,6 +107,8 @@ async function getEbooks(req, res, next) {
                   },
                 }
               : {}),
+            ...(availability === 'in-stock' ? { totalSold: 0 } : {}),
+            ...(availability === 'sold' ? { totalSold: { $gt: 0 } } : {}),
             $or: [
               { title: searchRegex },
               { 'writerInfo.name': searchRegex },
@@ -125,8 +146,15 @@ async function getEbooks(req, res, next) {
       ];
 
       const results = await Ebook.aggregate(pipeline);
-      const ebooks = results[0].data;
+      let ebooks = results[0].data;
       const total = results[0].total[0]?.count || 0;
+
+      if (req.user) {
+        ebooks = ebooks.map((obj) => {
+          obj.isPurchased = purchasedEbookIds.includes(obj._id.toString());
+          return obj;
+        });
+      }
 
       return res.json({
         success: true,
@@ -140,7 +168,7 @@ async function getEbooks(req, res, next) {
       });
     }
 
-    const [ebooks, total] = await Promise.all([
+    const [ebooksDocs, total] = await Promise.all([
       Ebook.find(filter)
         .populate('writer', 'name avatar')
         .sort(sortOption)
@@ -149,6 +177,14 @@ async function getEbooks(req, res, next) {
         .select('-description'),
       Ebook.countDocuments(filter),
     ]);
+
+    const ebooks = ebooksDocs.map((doc) => {
+      const obj = doc.toObject();
+      if (req.user) {
+        obj.isPurchased = purchasedEbookIds.includes(obj._id.toString());
+      }
+      return obj;
+    });
 
     res.json({
       success: true,
@@ -171,11 +207,28 @@ async function getEbooks(req, res, next) {
  */
 async function getFeaturedEbooks(req, res, next) {
   try {
-    const ebooks = await Ebook.find({ status: 'published' })
+    const ebooksDocs = await Ebook.find({ status: 'published' })
       .populate('writer', 'name avatar')
       .sort({ createdAt: -1 })
       .limit(8)
       .select('-description');
+
+    let purchasedEbookIds = [];
+    if (req.user) {
+      const transactions = await Transaction.find({
+        buyer: req.user._id,
+        status: 'completed',
+      }).select('ebook');
+      purchasedEbookIds = transactions.map((t) => t.ebook.toString());
+    }
+
+    const ebooks = ebooksDocs.map((doc) => {
+      const obj = doc.toObject();
+      if (req.user) {
+        obj.isPurchased = purchasedEbookIds.includes(obj._id.toString());
+      }
+      return obj;
+    });
 
     // Cache for 60s to speed up first-load on the homepage
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
@@ -234,10 +287,27 @@ async function getEbooksByWriter(req, res, next) {
       filter.status = 'published';
     }
 
-    const ebooks = await Ebook.find(filter)
+    const ebooksDocs = await Ebook.find(filter)
       .populate('writer', 'name avatar')
       .sort({ createdAt: -1 })
       .select('-description');
+
+    let purchasedEbookIds = [];
+    if (req.user) {
+      const transactions = await Transaction.find({
+        buyer: req.user._id,
+        status: 'completed',
+      }).select('ebook');
+      purchasedEbookIds = transactions.map((t) => t.ebook.toString());
+    }
+
+    const ebooks = ebooksDocs.map((doc) => {
+      const obj = doc.toObject();
+      if (req.user) {
+        obj.isPurchased = purchasedEbookIds.includes(obj._id.toString());
+      }
+      return obj;
+    });
 
     res.json({ success: true, ebooks });
   } catch (error) {

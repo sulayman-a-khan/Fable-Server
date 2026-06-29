@@ -19,7 +19,7 @@ const {
 
 // Public routes
 router.get('/', optionalAuth, getEbooks);
-router.get('/featured', getFeaturedEbooks);
+router.get('/featured', optionalAuth, getFeaturedEbooks);
 router.get('/writer/:writerId', optionalAuth, getEbooksByWriter);
 router.get('/:id/related', getRelatedEbooks);
 router.get('/:id', optionalAuth, getEbook);
